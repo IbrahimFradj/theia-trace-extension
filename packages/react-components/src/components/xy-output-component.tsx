@@ -25,6 +25,9 @@ type XYOuputState = AbstractOutputState & {
 };
 
 export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutputProps, XYOuputState> {
+    wheelTest: number;
+    testOn: number;
+    inWheel: boolean;
     private currentColorIndex = 0;
     private colorMap: Map<string, number> = new Map();
 
@@ -53,6 +56,10 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
 
     constructor(props: AbstractOutputProps) {
         super(props);
+        this.wheelTest = 0;
+        this.testOn = 0;
+        this.inWheel = false;
+
         this.state = {
             outputStatus: ResponseStatus.RUNNING,
             selectedSeriesId: [],
@@ -106,7 +113,7 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
         const chartWidthChanged = this.props.style.chartWidth !== prevProps.style.chartWidth;
         const needToUpdate = viewRangeChanged || checkedSeriesChanged || collapsedNodesChanged || chartWidthChanged;
         if (needToUpdate || prevState.outputStatus === ResponseStatus.RUNNING) {
-            this.updateXY();
+            this.updateXY(this.wheelTest);
         }
         if (this.lineChartRef.current) {
             this.lineChartRef.current.chartInstance.render();
@@ -156,12 +163,12 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
                 yAxes: [{ display: false }]
             },
             animation: { duration: 0 },
-            events: [ 'mousedown' ],
+            events: [ 'mousedown', 'onWheel'],
         };
         // width={this.props.style.chartWidth}
         return <React.Fragment>
             {this.state.outputStatus === ResponseStatus.COMPLETED ?
-                <div id='xy-main' onMouseDown={event => this.beginSelection(event)} style={{ height: this.props.style.height }} >
+                <div id='xy-main'  onWheel={event => this.wheelHandler(event)} onMouseDown={event => this.beginSelection(event)} style={{ height: this.props.style.height }} >
                     <Line
                         data={this.state.xyData}
                         height={parseInt(this.props.style.height.toString())}
@@ -288,14 +295,41 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
         document.addEventListener('mouseup', this.endSelection);
     }
 
-    private async updateXY() {
+    private wheelHandler(_evt: any) {
+        console.log('_evt', _evt.deltaY);
+        if (_evt.deltaY < 0) {
+            this.wheelTest = -1;
+        } else {
+            this.wheelTest = +1;
+        }
+        this.inWheel = true;
+        this.updateXY(this.wheelTest);
+
+    }
+    private async updateXY(wheelTest: number) {
         let start = 1332170682440133097;
         let end = 1332170682540133097;
+        const offset = this.props.viewRange.getOffset() ?? 0;
         const viewRange = this.props.viewRange;
         if (viewRange) {
+            console.log('viewrange debut', viewRange.getEnd());
             start = viewRange.getstart();
-            end = viewRange.getEnd();
+
+            this.testOn = viewRange.getEnd();
+            if (this.inWheel){
+                console.log('wheelTest',wheelTest);
+                this.testOn = this.testOn +wheelTest*(0.0000000001*  this.testOn);
+                // viewRange.setEnd( this.testOn);
+            }
+
+            end = this.testOn;
+            console.log('end', end);
+            console.log('this.testOn', this.testOn );
+            const fatigue =  this.testOn - offset;
+            viewRange.setEnd( fatigue);
+
         }
+        this.inWheel = false;
 
         const xyDataParameters = QueryHelper.selectionTimeQuery(
             QueryHelper.splitRangeIntoEqualParts(Math.trunc(start), Math.trunc(end), this.props.style.chartWidth), this.state.checkedSeries);

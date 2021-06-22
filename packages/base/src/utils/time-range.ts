@@ -50,4 +50,7 @@ export class TimeRange {
     public getOffset(): number | undefined {
         return this.offset;
     }
+    public setEnd( end: number ): void {
+        this.end = end;
+    }
 }
