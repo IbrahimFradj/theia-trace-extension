@@ -27,9 +27,10 @@ type XYOuputState = AbstractOutputState & {
 export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutputProps, XYOuputState> {
     private currentColorIndex = 0;
     private colorMap: Map<string, number> = new Map();
-
+    private xStartPos = 0;
     private lineChartRef: any;
     private mouseIsDown = false;
+    private iswheel = false;
     private posPixelSelect = 0;
     private plugin = {
         afterDraw: (chartInstance: Chart, _easing: Chart.Easing, _options?: any) => { this.afterChartDraw(chartInstance); }
@@ -42,6 +43,37 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
                 start: xStartPos,
                 end: xStartPos + ((event.screenX - this.posPixelSelect) / this.lineChartRef.current.chartInstance.width) * scale
             };
+        }
+    };
+
+    private zoomIn = (diffStartMouse: number, diffEndMouse: number) => {
+        const startRange = this.xStartPos - (diffStartMouse - (diffStartMouse * 0.1));
+        const endRange = this.xStartPos + (diffEndMouse - (diffEndMouse * 0.1));
+        this.props.unitController.viewRange = {
+            start: startRange,
+            end: endRange
+        };
+    };
+
+    private zoomOut = (diffStartMouse: number, diffEndMouse: number) => {
+        const startRange = this.xStartPos - (diffStartMouse + (diffStartMouse * 0.1));
+        const endRange = this.xStartPos + (diffEndMouse + (diffEndMouse * 0.1));
+        this.props.unitController.viewRange = {
+            start: Math.max(0, startRange),
+            end: Math.min(endRange, this.props.unitController.absoluteRange)
+        };
+    };
+
+    private zoom = (wheelEvent: React.WheelEvent) => {
+        if (this.iswheel) {
+            const diffStartMouse = (this.xStartPos - this.props.unitController.viewRange.start);
+            const diffEndMouse = (this.props.unitController.viewRange.end - this.xStartPos);
+            if (wheelEvent.deltaY < 0 && this.props.unitController.viewRangeLength >= 1) {
+                this.zoomIn(diffStartMouse, diffEndMouse);
+            } else if (wheelEvent.deltaY > 0) {
+                this.zoomOut(diffStartMouse, diffEndMouse);
+            }
+            this.iswheel = false;
         }
     };
 
@@ -61,7 +93,7 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
             collapsedNodes: [],
             orderedNodes: [],
             xyData: {},
-            columns: [{title: 'Name', sortable: true}]
+            columns: [{ title: 'Name', sortable: true }]
         };
 
         this.afterChartDraw = this.afterChartDraw.bind(this);
@@ -82,12 +114,12 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
                 const columns = [];
                 if (headers && headers.length > 0) {
                     headers.forEach(header => {
-                        columns.push({title: header.name, sortable: true, tooltip: header.tooltip});
+                        columns.push({ title: header.name, sortable: true, tooltip: header.tooltip });
                     });
                 } else {
-                    columns.push({title: 'Name', sortable: true});
+                    columns.push({ title: 'Name', sortable: true });
                 }
-                columns.push({title: 'Legend', sortable: false});
+                columns.push({ title: 'Legend', sortable: false });
                 this.setState({
                     outputStatus: treeResponse.status,
                     xyTree: treeResponse.model.entries,
@@ -156,12 +188,12 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
                 yAxes: [{ display: false }]
             },
             animation: { duration: 0 },
-            events: [ 'mousedown' ],
+            events: ['mousedown'],
         };
         // width={this.props.style.chartWidth}
         return <React.Fragment>
             {this.state.outputStatus === ResponseStatus.COMPLETED ?
-                <div id='xy-main' onMouseDown={event => this.beginSelection(event)} style={{ height: this.props.style.height }} >
+                <div id='xy-main' onWheel={event => { this.zoomWheel(event); }} onMouseDown={event => this.beginSelection(event)} style={{ height: this.props.style.height }} >
                     <Line
                         data={this.state.xyData}
                         height={parseInt(this.props.style.height.toString())}
@@ -171,14 +203,14 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
                     </Line>
                 </div> :
                 <div className='analysis-running'>
-                {(
+                    {(
                         <i
                             className='fa fa-refresh fa-spin'
                             style={{ marginRight: '5px' }}
                         />
                     )}
                     {
-                    'Analysis running'
+                        'Analysis running'
                     }
                 </div>}
         </React.Fragment>;
@@ -252,7 +284,7 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
                 newList = newList.concat(id);
             }
         });
-        this.setState({checkedSeries: newList});
+        this.setState({ checkedSeries: newList });
     }
 
     private onToggleCollapse(id: number, nodes: TreeNode[]) {
@@ -266,11 +298,11 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
             newList = newList.concat(id);
         }
         const orderedIds = getAllExpandedNodeIds(nodes, newList);
-        this.setState({collapsedNodes: newList, orderedNodes: orderedIds});
+        this.setState({ collapsedNodes: newList, orderedNodes: orderedIds });
     }
 
     private onOrderChange(ids: number[]) {
-        this.setState({orderedNodes: ids});
+        this.setState({ orderedNodes: ids });
     }
 
     private beginSelection(event: React.MouseEvent<HTMLDivElement, MouseEvent>) {
@@ -286,6 +318,23 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
         };
         document.addEventListener('mousemove', this.updateSelection);
         document.addEventListener('mouseup', this.endSelection);
+    }
+
+    private zoomWheel(wheelEvent: React.WheelEvent) {
+        if (wheelEvent.shiftKey) {
+            this.iswheel = true;
+            this.posPixelSelect = wheelEvent.nativeEvent.screenX;
+            const offset = this.props.viewRange.getOffset() ?? 0;
+            const scale = this.props.viewRange.getEnd() - this.props.viewRange.getstart();
+            const xPos = this.props.viewRange.getstart() - offset +
+                (wheelEvent.nativeEvent.offsetX / this.lineChartRef.current.chartInstance.width) * scale;
+            this.props.unitController.viewRange = {
+                start: xPos,
+                end: xPos
+            };
+            this.xStartPos = xPos;
+            this.zoom(wheelEvent);
+        }
     }
 
     private async updateXY() {
