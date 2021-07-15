@@ -23,13 +23,15 @@ type XYOuputState = AbstractOutputState & {
     xyData: any;
     columns: ColumnHeader[];
 };
-
+const TEN_PERCENT = 0.1;
 export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutputProps, XYOuputState> {
     private currentColorIndex = 0;
     private colorMap: Map<string, number> = new Map();
-
     private lineChartRef: any;
     private mouseIsDown = false;
+    private positionZoomMouse = 0;
+    private positionZommkeyboard = 0;
+    private iszoomKeyboard = false;
     private posPixelSelect = 0;
     private plugin = {
         afterDraw: (chartInstance: Chart, _easing: Chart.Easing, _options?: any) => { this.afterChartDraw(chartInstance); }
@@ -161,7 +163,10 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
         // width={this.props.style.chartWidth}
         return <React.Fragment>
             {this.state.outputStatus === ResponseStatus.COMPLETED ?
-                <div id='xy-main' onMouseDown={event => this.beginSelection(event)} style={{ height: this.props.style.height }} >
+                <div id='xy-main' onKeyDown={event => this.zoomKey(event)} tabIndex={0}
+                    onWheel={event => this.wheelEvent(event)}
+                    onMouseMove={event => this.MoveEvent(event)}
+                    onMouseDown={event => this.beginSelection(event)} style={{ height: this.props.style.height }}  >
                     <Line
                         data={this.state.xyData}
                         height={parseInt(this.props.style.height.toString())}
@@ -276,16 +281,183 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
     private beginSelection(event: React.MouseEvent<HTMLDivElement, MouseEvent>) {
         this.mouseIsDown = true;
         this.posPixelSelect = event.nativeEvent.screenX;
-        const offset = this.props.viewRange.getOffset() ?? 0;
-        const scale = this.props.viewRange.getEnd() - this.props.viewRange.getstart();
-        const xPos = this.props.viewRange.getstart() - offset +
-            (event.nativeEvent.offsetX / this.lineChartRef.current.chartInstance.width) * scale;
+        const xPos = this.getPosition(event);
         this.props.unitController.selectionRange = {
             start: xPos,
             end: xPos
         };
         document.addEventListener('mousemove', this.updateSelection);
         document.addEventListener('mouseup', this.endSelection);
+    }
+
+    private updatePosition(percentMousePosition: number) {
+        const newPosition = percentMousePosition * this.props.unitController.viewRangeLength;
+        this.positionZoomMouse = newPosition + this.props.unitController.viewRange.start;
+    }
+
+    private newRange(zoomIn: number, startPosition: number, endPosition: number): number[] {
+        let newStartRange = 0;
+        let newEndRange = 0;
+        let positionZoom = 0;
+        if (this.iszoomKeyboard) {
+            positionZoom = this.positionZommkeyboard;
+        } else {
+            positionZoom = this.positionZoomMouse;
+        }
+        newStartRange = positionZoom - (startPosition - zoomIn * (startPosition * TEN_PERCENT));
+        newEndRange = positionZoom + (endPosition - zoomIn * (endPosition * TEN_PERCENT));
+        return [newStartRange, newEndRange];
+    }
+
+    private zoomIn(startPosition: number, endPosition: number, percentMousePosition: number) {
+        const zoomIn = 1;
+        this.props.unitController.viewRange = {
+            start: this.newRange(zoomIn, startPosition, endPosition)[0],
+            end: this.newRange(zoomIn, startPosition, endPosition)[1]
+        };
+        if (this.iszoomKeyboard) {
+            this.updatePosition(percentMousePosition);
+        }
+    }
+
+    private zoomOut(startPosition: number, endPosition: number, percentMousePosition: number) {
+        const zoomOut = -1;
+        this.props.unitController.viewRange = {
+            start: this.newRange(zoomOut, startPosition, endPosition)[0],
+            end: this.newRange(zoomOut, startPosition, endPosition)[1]
+        };
+        if (this.iszoomKeyboard) {
+            this.updatePosition(percentMousePosition);
+        }
+    }
+
+    private NewstartEndRange(shift: number, percentRange: number): number[] {
+        const startRange = this.props.unitController.viewRange.start + (shift * percentRange);
+        const endRange = this.props.unitController.viewRange.end + (shift * percentRange);
+        const arr = [startRange, endRange];
+        return arr;
+    }
+
+    private shift(right: number, percentRange: number) {
+        if (this.NewstartEndRange(right, percentRange)[0] <= 0) {
+            this.props.unitController.viewRange = {
+                start: 0,
+                end: this.props.unitController.viewRangeLength
+            };
+        } else if (this.NewstartEndRange(right, percentRange)[1] >= this.props.unitController.absoluteRange) {
+            this.props.unitController.viewRange = {
+                start: this.props.unitController.absoluteRange - this.props.unitController.viewRangeLength,
+                end: this.props.unitController.absoluteRange
+            };
+        } else {
+            this.positionZommkeyboard = this.positionZommkeyboard + right * percentRange;
+            this.positionZoomMouse = this.positionZoomMouse + right * percentRange;
+            this.props.unitController.viewRange = {
+                start: this.NewstartEndRange(right, percentRange)[0],
+                end: this.NewstartEndRange(right, percentRange)[1]
+            };
+        }
+    }
+
+    private shiftLeft(percentRange: number) {
+        const numberLeft = -1;
+        this.shift(numberLeft, percentRange);
+    }
+
+    private shiftRight(percentRange: number) {
+        const numberright = 1;
+        this.shift(numberright, percentRange);
+    }
+
+    private wheelEvent(wheel: React.WheelEvent) {
+        if (wheel.shiftKey) {
+            const percentRange = this.props.unitController.viewRangeLength * TEN_PERCENT;
+            if (wheel.deltaY < 0) {
+                this.shiftLeft(percentRange);
+            }
+            else if (wheel.deltaY > 0) {
+                this.shiftRight(percentRange);
+            }
+        }
+    }
+
+    private getPosition(event: React.MouseEvent): number {
+        const offset = this.props.viewRange.getOffset() ?? 0;
+        const scale = this.props.viewRange.getEnd() - this.props.viewRange.getstart();
+        const xPos = this.props.viewRange.getstart() - offset +
+            (event.nativeEvent.offsetX / this.lineChartRef.current.chartInstance.width) * scale;
+        return xPos;
+    }
+
+    private MoveEvent(event: React.MouseEvent) {
+        if (!this.mouseIsDown) {
+            this.positionZoomMouse = this.getPosition(event);
+        }
+    }
+
+    private initializePosition(): number[] {
+        let position = 0;
+        if (this.iszoomKeyboard) {
+            this.positionZommkeyboard = (this.props.unitController.viewRange.end + this.props.unitController.viewRange.start) / 2;
+            position = this.positionZommkeyboard;
+        } else {
+            position = this.positionZoomMouse;
+        }
+        const startPosition = position - this.props.unitController.viewRange.start;
+        const endPosition = this.props.unitController.viewRange.end - position;
+        return [startPosition, endPosition];
+    }
+
+    private mousePositionPercent(): number {
+        const diffStartMouse = this.positionZoomMouse - this.props.unitController.viewRange.start;
+        const percentMousePosition = diffStartMouse / this.props.unitController.viewRangeLength;
+        return percentMousePosition;
+    }
+
+    private zoomKey(key: React.KeyboardEvent) {
+        const percentRange = this.props.unitController.viewRangeLength * TEN_PERCENT;
+        switch (key.key) {
+            case '+':
+            case '=': {
+                this.iszoomKeyboard = true;
+                if (this.props.unitController.viewRangeLength >= 1) {
+                    this.zoomIn(this.initializePosition()[0], this.initializePosition()[1], this.mousePositionPercent());
+                }
+                break;
+            }
+            case 'W':
+            case 'w': {
+                this.iszoomKeyboard = false;
+                if (this.props.unitController.viewRangeLength >= 1) {
+                    this.zoomIn(this.initializePosition()[0], this.initializePosition()[1], this.mousePositionPercent());
+                }
+                break;
+            }
+            case '-':
+            case '_': {
+                this.iszoomKeyboard = true;
+                this.zoomOut(this.initializePosition()[0], this.initializePosition()[1], this.mousePositionPercent());
+                break;
+            }
+            case 'S':
+            case 's': {
+                this.iszoomKeyboard = false;
+                this.zoomOut(this.initializePosition()[0], this.initializePosition()[1], this.mousePositionPercent());
+                break;
+            }
+            case 'A':
+            case 'a':
+            case 'ArrowLeft': {
+                this.shiftLeft(percentRange);
+                break;
+            }
+            case 'D':
+            case 'd':
+            case 'ArrowRight': {
+                this.shiftRight(percentRange);
+                break;
+            }
+        }
     }
 
     private async updateXY() {
