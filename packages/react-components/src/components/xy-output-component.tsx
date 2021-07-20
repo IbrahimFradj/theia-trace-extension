@@ -25,6 +25,7 @@ type XYOuputState = AbstractOutputState & {
 };
 const TEN_PERCENT = 0.1;
 export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutputProps, XYOuputState> {
+    private static instanceCounter = 0;
     private currentColorIndex = 0;
     private colorMap: Map<string, number> = new Map();
     private lineChartRef: any;
@@ -33,6 +34,7 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
     private positionZommkeyboard = 0;
     private iszoomKeyboard = false;
     private posPixelSelect = 0;
+    readonly instanceId;
     private plugin = {
         afterDraw: (chartInstance: Chart, _easing: Chart.Easing, _options?: any) => { this.afterChartDraw(chartInstance); }
     };
@@ -53,6 +55,8 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
         document.removeEventListener('mouseup', this.endSelection);
     };
 
+    private preventDefaultHandler: ((event: WheelEvent) => void) | undefined;
+
     constructor(props: AbstractOutputProps) {
         super(props);
         this.state = {
@@ -68,6 +72,7 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
 
         this.afterChartDraw = this.afterChartDraw.bind(this);
         this.lineChartRef = React.createRef();
+        this.instanceId = XYOutputComponent.instanceCounter++;
     }
 
     componentDidMount(): void {
@@ -111,7 +116,30 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
             this.updateXY();
         }
         if (this.lineChartRef.current) {
+            if (this.preventDefaultHandler === undefined) {
+                this.preventDefaultHandler = (event: WheelEvent) => {
+                    if (event.ctrlKey) {
+                        event.preventDefault();
+                    }
+                };
+                const xyMainElement = document.getElementById(this.getUniqueDivId());
+                if (xyMainElement) {
+                    xyMainElement.addEventListener('wheel', this.preventDefaultHandler);
+                } else {
+                    this.preventDefaultHandler = undefined;
+                }
+            }
             this.lineChartRef.current.chartInstance.render();
+        }
+    }
+
+    componentWillUnmount(): void {
+        if (this.preventDefaultHandler !== undefined) {
+            const xyMainElement = document.getElementById(this.getUniqueDivId());
+            if (xyMainElement) {
+                xyMainElement.removeEventListener('wheel', this.preventDefaultHandler);
+            }
+            this.preventDefaultHandler = undefined;
         }
     }
 
@@ -163,7 +191,7 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
         // width={this.props.style.chartWidth}
         return <React.Fragment>
             {this.state.outputStatus === ResponseStatus.COMPLETED ?
-                <div id='xy-main' onKeyDown={event => this.zoomKey(event)} tabIndex={0}
+                <div id={this.getUniqueDivId()} onKeyDown={event => this.zoomKey(event)} tabIndex={0}
                     onWheel={event => this.wheelEvent(event)}
                     onMouseMove={event => this.MoveEvent(event)}
                     onMouseDown={event => this.beginSelection(event)} style={{ height: this.props.style.height }}  >
@@ -187,6 +215,10 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
                     }
                 </div>}
         </React.Fragment>;
+    }
+
+    private getUniqueDivId(): string {
+        return 'xy-main' + this.instanceId;
     }
 
     private afterChartDraw(chart: Chart) {
@@ -377,6 +409,15 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
             }
             else if (wheel.deltaY > 0) {
                 this.shiftRight(percentRange);
+            }
+        } else if (wheel.ctrlKey) {
+            this.iszoomKeyboard = false;
+            if (wheel.deltaY < 0) {
+                if (this.props.unitController.viewRangeLength >= 1) {
+                    this.zoomIn(this.initializePosition()[0], this.initializePosition()[1], this.mousePositionPercent());
+                }
+            } else if (wheel.deltaY > 0) {
+                this.zoomOut(this.initializePosition()[0], this.initializePosition()[1], this.mousePositionPercent());
             }
         }
     }
