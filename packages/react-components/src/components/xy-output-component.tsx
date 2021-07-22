@@ -24,6 +24,8 @@ type XYOuputState = AbstractOutputState & {
     columns: ColumnHeader[];
 };
 const TEN_PERCENT = 0.1;
+const RIGHT_CLICK = 2;
+
 export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutputProps, XYOuputState> {
     private static instanceCounter = 0;
     private currentColorIndex = 0;
@@ -32,6 +34,7 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
     private mouseIsDown = false;
     private positionZoomMouse = 0;
     private positionZommkeyboard = 0;
+    private rangeStart = 0;
     private iszoomKeyboard = false;
     private posPixelSelect = 0;
     readonly instanceId;
@@ -194,6 +197,8 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
                 <div id={this.getUniqueDivId()} onKeyDown={event => this.zoomKey(event)} tabIndex={0}
                     onWheel={event => this.wheelEvent(event)}
                     onMouseMove={event => this.MoveEvent(event)}
+                    onContextMenu={event => event.preventDefault()}
+                    onMouseUp={event => this.mouseUp(event)}
                     onMouseDown={event => this.beginSelection(event)} style={{ height: this.props.style.height }}  >
                     <Line
                         data={this.state.xyData}
@@ -314,12 +319,39 @@ export class XYOutputComponent extends AbstractTreeOutputComponent<AbstractOutpu
         this.mouseIsDown = true;
         this.posPixelSelect = event.nativeEvent.screenX;
         const xPos = this.getPosition(event);
-        this.props.unitController.selectionRange = {
-            start: xPos,
-            end: xPos
+        if (event.button === RIGHT_CLICK) {
+            this.rangeStart = xPos;
+        } else {
+            this.props.unitController.selectionRange = {
+                start: xPos,
+                end: xPos
+            };
+            document.addEventListener('mousemove', this.updateSelection);
+            document.addEventListener('mouseup', this.endSelection);
+        }
+    }
+
+    private updateRange(rangeStart: number, rangeEnd: number) {
+        if (rangeEnd < rangeStart) {
+            const temp = rangeStart;
+            rangeStart = rangeEnd;
+            rangeEnd = temp;
+        }
+        this.props.unitController.viewRange = {
+            start: rangeStart,
+            end: rangeEnd
         };
-        document.addEventListener('mousemove', this.updateSelection);
-        document.addEventListener('mouseup', this.endSelection);
+    }
+
+    private mouseUp(event: React.MouseEvent<HTMLDivElement, MouseEvent>) {
+        if (event.button === RIGHT_CLICK) {
+            this.positionZoomMouse = this.getPosition(event);
+            const percent = this.mousePositionPercent();
+            const rangeEnd = this.positionZoomMouse;
+            this.updateRange(this.rangeStart, rangeEnd);
+            this.updatePosition(percent);
+            this.mouseIsDown = false;
+        }
     }
 
     private updatePosition(percentMousePosition: number) {
